@@ -231,7 +231,7 @@ function save_user_index($worker = null)
     $time = time();
 
     // 会和下面的更新采集时间发送死锁，因为Order By 会扫描整张表，虽然desc出来的rows为1，也不知道为什么
-    //$sql = "Update `user` Set `index_progress_id`='{$progress_id}' Order By `index_uptime` Asc Limit 1";
+    //$sql = "Update `user` Set `index_progress_id`='{$pr ogress_id}' Order By `index_uptime` Asc Limit 1";
     // 效率太低
     //$sql = "Update `user` Set `index_progress_id`='15895' Where `index_uptime` = (Select Min(`index_uptime`) From (Select tmp.* From user tmp) a limit 1);";
     // 语法错误
@@ -242,7 +242,8 @@ function save_user_index($worker = null)
     //$sql = "Select `username`, `depth` From `user` Where `index_progress_id`='{$progress_id}' Order By `index_uptime` Asc Limit 1";
     //$row = db::get_one($sql);
     //if (!empty($row['username'])) 
-    $username = get_user_queue('index');
+    //$username = get_user_queue('list');
+    $username = 'laruence';
     if (!empty($username)) 
     {
         $username = addslashes($username);
@@ -252,7 +253,7 @@ function save_user_index($worker = null)
         $depth = $row['depth'];
 
         // 更新采集时间, 让队列每次都取到不同的用户
-        $sql = "Update `user` Set `index_uptime`='{$time}',`index_progress_id`='{$progress_id}' Where `username`='{$username}'";
+        $sql = "Update `user` Set `list_uptime`='{$time}',`info_progress_id`='{$progress_id}' Where `username`='{$username}'";
         db::query($sql);
 
         $worker->log("采集用户列表 --- " . $username . " --- 开始");
@@ -260,6 +261,7 @@ function save_user_index($worker = null)
         // $user_type followees 、followers
         // 获取关注了
         $followees_user = get_user_index($username, 'followees', $worker);
+        file_put_contents("123.txt", var_export($followees_user, true), FILE_APPEND);
         $worker->log("采集用户列表 --- " . $username . " --- 关注了 --- 成功");
         // 获取关注者
         $followers_user = get_user_index($username, 'followers', $worker);
@@ -282,7 +284,7 @@ function save_user_index($worker = null)
                 {
                     $user_row['depth'] = $depth+1;
                     $user_row['parent_username'] = $username;
-                    $user_row['addtime'] = $user_row['index_uptime'] = $user_row['info_uptime'] = time();
+                    $user_row['addtime'] = $user_row['list_uptime'] = $user_row['info_uptime'] = time();
                     if (db::insert('user', $user_row))
                     {
                         $worker->log("入库用户 --- " . $c_username . " --- 成功");
@@ -317,11 +319,19 @@ function save_user_index($worker = null)
 function get_user_index($username, $user_type = 'followees', $worker)
 {
     $url = "http://www.zhihu.com/people/{$username}/{$user_type}";
-    set_cookie();
-    cls_curl::set_gzip(true);
-    $content = cls_curl::get($url);
+    //set_cookie();
+//    cls_curl::set_cookie(file_get_contents('cookie.txt'));
+//    cls_curl::set_gzip(true);
 
-    if (empty($content)) 
+    $cookie = trim(file_get_contents('cookie.txt'));
+    $curl = new rolling_curl();
+    $curl->set_cookie($cookie);
+    $curl->set_gzip(true);
+    $curl->get($url);
+    $content = $curl->execute();
+    //$content = cls_curl::get($url);
+
+    if (empty($content))
     {
         return array();
     }
@@ -329,9 +339,10 @@ function get_user_index($username, $user_type = 'followees', $worker)
     $users = array();
 
     // 用户不足20个的时候，从ajax取不到用户，所以首页这里还是要取一下
-    preg_match_all('#<h2 class="zm-list-content-title"><a data-tip=".*?" href="http://www.zhihu.com/people/(.*?)" class="zg-link" title=".*?">(.*?)</a></h2>#', $content, $out);
+    preg_match_all('#<a data-hovercard=".*" href="https://www.zhihu.com/people/(.*)" class="zg-link author-link" title="Laruence"
+>(.*)</a></span></h2>#', $content, $out);
     $count = count($out[1]);
-    for ($i = 0; $i < $count; $i++) 
+    for ($i = 0; $i < $count; $i++)
     {
         $d_username = empty($out[1][$i]) ? '' : $out[1][$i]; 
         $d_nickname = empty($out[2][$i]) ? '' : $out[2][$i]; 
@@ -360,6 +371,7 @@ function get_user_index($username, $user_type = 'followees', $worker)
         $url = "http://www.zhihu.com/node/" . $url_params['nodename'];
         $params = $url_params['params'];
 
+        $user_count = $user_count >= 40 ? 40 : $user_count;
         $j = 1;
         for ($i = 0; $i < $user_count; $i=$i+20) 
         {
@@ -369,7 +381,8 @@ function get_user_index($username, $user_type = 'followees', $worker)
                 'params'=>json_encode($params),
                 '_xsrf'=>$_xsrf,
             );
-            $content = cls_curl::post($url, $post_data);
+            $curl->post($url, $post_data);
+            $content = $curl->execute();
             if (empty($content)) 
             {
                 $worker->log("采集用户 --- " . $username . " --- {$keyword} --- 第{$j}页 --- 失败\n");
@@ -385,7 +398,7 @@ function get_user_index($username, $user_type = 'followees', $worker)
 
             foreach ($rows['msg'] as $row) 
             {
-                preg_match_all('#<h2 class="zm-list-content-title"><a data-tip=".*?" href="http://www.zhihu.com/people/(.*?)" class="zg-link" title=".*?">(.*?)</a></h2>#', $row, $out);
+                preg_match_all('#<a data-hovercard=".*?" href="https://www.zhihu.com/people/(.*?)" class="zg-link.*" title=".*?">(.*?)</a>#', $row, $out);
                 $d_username = empty($out[1][0]) ? '' : $out[1][0]; 
                 $d_nickname = empty($out[2][0]) ? '' : $out[2][0]; 
                 if (!empty($d_username) && !empty($d_nickname)) 

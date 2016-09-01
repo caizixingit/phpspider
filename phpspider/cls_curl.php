@@ -21,7 +21,7 @@ class cls_curl
     protected static $cookie = null;
     protected static $cookie_jar = null;
     protected static $cookie_file = null;
-    protected static $referer = null;
+    protected static $referer = 'https://www.zhihu.com/';
     protected static $ip = null;
     protected static $headers = array();
     protected static $hosts = array();
